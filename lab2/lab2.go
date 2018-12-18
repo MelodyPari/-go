@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 	"github.com/gocraft/web"
 	"github.com/golang/glog"
 	_ "github.com/jackc/pgx/stdlib"
@@ -32,8 +31,8 @@ type Context struct {
 	access bool
 }
 
-// Doc - структура для вывода одного документа
-type Doc struct {
+// Document - структура для вывода одного документа
+type Document struct {
 	ID      int      `json:"id"`
 	Name    string   `json:"name"`
 	Mime    string   `json:"mime"`
@@ -43,29 +42,29 @@ type Doc struct {
 	Grant   []string `json:"grant,omitempty"`
 }
 
-// Docs - список документов
-type Docs struct {
+// Documents - список документов
+type Documents struct {
 	File string `json:"file,omitempty"`
-	Dcs  []*Doc `json:"docs,omitempty"`
+	Dcs  []*Document `json:"documents,omitempty"`
 }
 
-// Er - вывод ошибок
-type Er struct {
+// Errors - вывод ошибок
+type Errors struct {
 	Code int    `json:"code"`
 	Text string `json:"text"`
 }
 
-// Res - остальные ответы
-type Res struct {
+// Result - остальные ответы
+type Result struct {
 	Login string `json:"login,omitempty"`
 	Token string `json:"token,omitempty"`
 }
 
 // Output - main output view
 type Output struct {
-	Error    *Er   `json:"error,omitempty"`
-	Response *Res  `json:"response,omitempty"`
-	Data     *Docs `json:"data,omitempty"`
+	Error    *Errors   `json:"error,omitempty"`
+	Response *Result  `json:"response,omitempty"`
+	Data     *Documents `json:"data,omitempty"`
 }
 
 var (
@@ -86,7 +85,7 @@ func main() {
 		glog.Fatal(err)
 	}
 
-	connStr := "postgres://" + strings.TrimRight(string(b), "\r\n") + "@localhost/docs?sslmode=disable"
+	connStr := "postgres://" + strings.TrimRight(string(b), "\r\n") + "@localhost/documents?sslmode=disable"
 
 	db, err = sqlx.Connect("pgx", connStr)
 	if err != nil {
@@ -113,13 +112,13 @@ func main() {
 		Middleware((*Context).Error).
 		Middleware((*Context).AuthCheck).
 		Get("/auth", (*Context).AuthPage).
-		Get("/docs", (*Context).Documents).
-		Get("/docs/:id", (*Context).Doc).
+		Get("/documents", (*Context).Documents).
+		Get("/documents/:id", (*Context).Document).
 		Get("/load", (*Context).DocumentsLoad).
 		Get("/logout", (*Context).Logout).
 		Post("/create", (*Context).DocumentsCreate).
 		Post("/authform", (*Context).Auth).
-		Delete("/docs/:id", (*Context).DelDoc).
+		Delete("/documents/:id", (*Context).DelDoc).
 		NotFound((*Context).NotFound)
 
 	if err := http.ListenAndServe("localhost:9000", router); err != nil {
@@ -162,7 +161,7 @@ func (c *Context) AuthCheck(rw web.ResponseWriter, r *web.Request, next web.Next
 	}
 
 	if token == "" {
-		if strings.Contains(r.URL.Path, "docs") {
+		if strings.Contains(r.URL.Path, "documents") {
 			c.access = false
 			next(rw, r)
 			return
@@ -187,7 +186,7 @@ func (c *Context) AuthCheck(rw web.ResponseWriter, r *web.Request, next web.Next
 		return
 	}
 
-	if strings.Contains(r.URL.Path, "docs") {
+	if strings.Contains(r.URL.Path, "documents") {
 		if chname.Valid {
 			c.access = true
 			next(rw, r)
@@ -249,7 +248,7 @@ func (c *Context) Auth(rw web.ResponseWriter, req *web.Request) {
 	}
 
 	output := &Output{
-		Response: &Res{
+		Response: &Result{
 			Token: uuStr,
 		},
 	}
@@ -270,7 +269,7 @@ func (c *Context) Logout(rw web.ResponseWriter, req *web.Request) {
 		return
 	}
 	output := &Output{
-		Response: &Res{
+		Response: &Result{
 			Token: token,
 		},
 	}
@@ -319,11 +318,11 @@ func (c *Context) Documents(rw web.ResponseWriter, req *web.Request) {
 	} else {
 
 		output := &Output{
-			Data: &Docs{
-				Dcs: make([]*Doc, 0, 100),
+			Data: &Documents{
+				Dcs: make([]*Document, 0, 100),
 			},
 		}
-		var doc *Doc
+		var document *Document
 		var rows *sqlx.Rows
 
 		filter := ""
@@ -353,7 +352,7 @@ func (c *Context) Documents(rw web.ResponseWriter, req *web.Request) {
 		}
 		text := `
 			select id, name, mime, public, filedir, created
-			from docs_table
+			from documents_table
 			where true
 			` + filter + ac + `
 			order by name ASC, created ASC
@@ -367,13 +366,13 @@ func (c *Context) Documents(rw web.ResponseWriter, req *web.Request) {
 		defer rows.Close()
 
 		for rows.Next() {
-			doc = new(Doc)
-			err = rows.Scan(&doc.ID, &doc.Name, &doc.Mime, &doc.Public, &doc.File, &doc.Created)
+			document = new(Document)
+			err = rows.Scan(&document.ID, &document.Name, &document.Mime, &document.Public, &document.File, &document.Created)
 			if err != nil {
 				c.err = errors.Wrap(err, "Scan db error")
 				return
 			}
-			output.Data.Dcs = append(output.Data.Dcs, doc)
+			output.Data.Dcs = append(output.Data.Dcs, document)
 		}
 
 		if err = rows.Err(); err != nil {
@@ -384,7 +383,7 @@ func (c *Context) Documents(rw web.ResponseWriter, req *web.Request) {
 		var mr []byte
 		mr, err = json.Marshal(output)
 		if err != nil {
-			c.err = errors.Wrap(err, "Docs Marshaling error")
+			c.err = errors.Wrap(err, "Documents Marshaling error")
 			return
 		}
 		rw.Header().Set("Content-Type", "application/json")
@@ -397,8 +396,8 @@ func (c *Context) Documents(rw web.ResponseWriter, req *web.Request) {
 
 }
 
-//Doc - Output one document by id
-func (c *Context) Doc(rw web.ResponseWriter, req *web.Request) {
+//Document - Output one document by id
+func (c *Context) Document(rw web.ResponseWriter, req *web.Request) {
 
 	idstr := req.PathParams["id"]
 	idint, err := strconv.Atoi(idstr)
@@ -408,8 +407,8 @@ func (c *Context) Doc(rw web.ResponseWriter, req *web.Request) {
 		return
 	}
 
-	content := "docs_ctype_" + idstr
-	onedoc := "docs" + idstr
+	content := "documents_ctype_" + idstr
+	onedoc := "documents" + idstr
 
 	lock.RLock()
 	data, ok1 := storage[onedoc]
@@ -442,7 +441,7 @@ func (c *Context) Doc(rw web.ResponseWriter, req *web.Request) {
 
 		text := `
 			select id, name, mime, public, filedir, created, hname 
-			from docs_table
+			from documents_table
 			where id = ? ` + ac
 		rows, err = db.Queryx(db.Rebind(text), args...)
 		if err != nil {
@@ -451,11 +450,11 @@ func (c *Context) Doc(rw web.ResponseWriter, req *web.Request) {
 		}
 		defer rows.Close()
 
-		var doc *Doc
+		var document *Document
 		var hashname string
 		for rows.Next() {
-			doc = new(Doc)
-			err = rows.Scan(&doc.ID, &doc.Name, &doc.Mime, &doc.Public, &doc.File, &doc.Created, &hashname)
+			document = new(Document)
+			err = rows.Scan(&document.ID, &document.Name, &document.Mime, &document.Public, &document.File, &document.Created, &hashname)
 			if err != nil {
 				c.err = errors.Wrap(err, "Scan db error")
 				return
@@ -479,7 +478,7 @@ func (c *Context) Doc(rw web.ResponseWriter, req *web.Request) {
 			return
 		}
 
-		attachment := "attachment; filename=" + doc.Name
+		attachment := "attachment; filename=" + document.Name
 		rw.Header().Set("Content-Disposition", attachment)
 		rw.Write(b)
 
@@ -494,7 +493,7 @@ func (c *Context) Doc(rw web.ResponseWriter, req *web.Request) {
 func (c *Context) NotFound(rw web.ResponseWriter, req *web.Request) {
 
 	output := &Output{
-		Error: &Er{
+		Error: &Errors{
 			Code: 404,
 			Text: "Page Not Found",
 		},
@@ -503,7 +502,7 @@ func (c *Context) NotFound(rw web.ResponseWriter, req *web.Request) {
 	var mr []byte
 	mr, err = json.Marshal(output)
 	if err != nil {
-		c.err = errors.Wrap(err, "Docs Marshaling error")
+		c.err = errors.Wrap(err, "Documents Marshaling error")
 		return
 	}
 	rw.Header().Set("Content-Type", "application/json")
@@ -545,7 +544,7 @@ func (c *Context) Error(rw web.ResponseWriter, req *web.Request, next web.NextMi
 			text = c.err.Error()
 		}
 		output := &Output{
-			Error: &Er{
+			Error: &Errors{
 				Code: code,
 				Text: text,
 			},
@@ -561,7 +560,7 @@ func (c *Context) DocumentsLoad(rw web.ResponseWriter, req *web.Request) {
 	rw.Header().Set("Content-Type", "multipart/form-data")
 }
 
-//DocumentsCreate - load, save doc and doc info to db
+//DocumentsCreate - load, save document and document info to db
 func (c *Context) DocumentsCreate(rw web.ResponseWriter, req *web.Request) {
 
 	if err := req.ParseMultipartForm(32 << 20); err != nil { // 32Mb max file upload size
@@ -595,7 +594,7 @@ func (c *Context) DocumentsCreate(rw web.ResponseWriter, req *web.Request) {
 	public := req.FormValue("pub")
 	filedir := req.FormValue("fd")
 
-	text := `insert into docs_table (name, mime, public, filedir, hname) 
+	text := `insert into documents_table (name, mime, public, filedir, hname) 
 	values ($1, $2, $3, $4, $5);`
 
 	_, err = db.Exec(text, filename, mime, public, filedir, hname)
@@ -609,7 +608,7 @@ func (c *Context) DocumentsCreate(rw web.ResponseWriter, req *web.Request) {
 	lock.Unlock()
 
 	output := &Output{
-		Data: &Docs{
+		Data: &Documents{
 			File: filename,
 		},
 	}
@@ -634,7 +633,7 @@ func (c *Context) DelDoc(rw web.ResponseWriter, req *web.Request) {
 	}
 
 	var hn sql.NullString
-	err = db.QueryRow("select hname from docs_table where id = $1;", idint).Scan(&hn)
+	err = db.QueryRow("select hname from documents_table where id = $1;", idint).Scan(&hn)
 	if err != nil {
 		c.err = errors.Wrap(err, "Query db error")
 		return
@@ -649,14 +648,14 @@ func (c *Context) DelDoc(rw web.ResponseWriter, req *web.Request) {
 	storage = make(map[string]string)
 	lock.Unlock()
 
-	_, err = db.Exec("delete from docs_table where id = $1;", idint)
+	_, err = db.Exec("delete from documents_table where id = $1;", idint)
 	if err != nil {
 		c.err = errors.Wrap(err, "Delete from db error")
 		return
 	}
 
 	output := &Output{
-		Response: &Res{
+		Response: &Result{
 			Token: token,
 		},
 	}
